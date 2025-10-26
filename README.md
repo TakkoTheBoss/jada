@@ -1,8 +1,17 @@
+
 ![Jada Mascot](jada-logo.png "Jada!!")
 
 # Jada
 
 Jada is a resilient, Kademlia-based distributed hash table (DHT) that supports both single key/value operations and grouped data storage. It includes an embedded JSON API server and a built-in CLI for interacting with nodes locally or remotely. Optional post-quantum cryptography is still under testing.
+
+![simple KDHT](simple-kademlia.png "Simple Kademlia DHT")
+Figure 1. [Simple Kademlia Peering subtree](https://medium.com/@vmandke/kademlia-89142a8c2627)
+
+![Kademlia Routing](kademlia-routing.png "kademlia routing")
+Figure 2. [XOR Distance Lookup](https://medium.com/coinmonks/a-brief-overview-of-kademlia-and-its-use-in-various-decentralized-platforms-da08a7f72b8f)
+
+
 
 ***
 ## Features
@@ -16,18 +25,21 @@ Jada is a resilient, Kademlia-based distributed hash table (DHT) that supports b
 - Built to run indefinitely
 - Fully namespaced for Hachi integration
 
+
 ***
 
 ## File Overview
 
-|File|Purpose|
-|---|---|
-|`jada.cpp`|Main implementation of the Jada DHT and CLI logic. All functions live under the `jada` namespace.|
-|`jada.hachi`|Entry point for compiling and running Jada with the Hachi compiler.|
+| File         | Purpose                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------- |
+| `jada.cpp`   | Main implementation of the Jada DHT and CLI logic. All functions live under the `jada` namespace. |
+| `jada.hachi` | Entry point for compiling and running Jada with the Hachi compiler.                               |
 
 ***
 
-## Building with Hachi
+## Building with [Hachi](https://hdev.run)
+
+![](hachi+jada.png)
 
 To build Jada using the Hachi compiler:
 
