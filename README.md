@@ -1,5 +1,7 @@
 
-![Jada Mascot](jada-logo.png "Jada!!")
+<p align="center">
+  <img src="jada-logo.png" alt="Hachiko — The Hachi Mascot" title="Hachiko — The Hachi Mascot" width="40%">
+</p>
 
 # Jada
 
@@ -39,7 +41,9 @@ Figure 2. [XOR Distance Lookup](https://medium.com/coinmonks/a-brief-overview-of
 
 ## Building with [Hachi](https://hdev.run)
 
-![Hachi and Jada together again!](hachi+jada.png "Hachi and Jada together again!")
+<p align="center">
+  <img src="hachi+Jada.png" alt="Hachiko — The Hachi Mascot" title="Hachiko — The Hachi Mascot" width="55%">
+</p>
 
 To build Jada using the Hachi compiler:
 
