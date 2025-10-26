@@ -1,0 +1,6 @@
+outerCPP: "
+namespace jada { int run_jada(int argc, char** argv); }
+#include \"jada.cpp\"
+"
+
+innerCPP:"jada::run_jada(argc, argv);"
