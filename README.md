@@ -39,7 +39,7 @@ Figure 2. [XOR Distance Lookup](https://medium.com/coinmonks/a-brief-overview-of
 
 ## Building with [Hachi](https://hdev.run)
 
-![](hachi+jada.png)
+![Hachi and Jada together again!](hachi+jada.png "Hachi and Jada together again!")
 
 To build Jada using the Hachi compiler:
 
