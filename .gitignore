@@ -1,0 +1,7 @@
+/jada
+/*.generated.cpp
+/config.json
+/*_snapshot.json
+/tests/node.log
+/tests/smoke_snapshot.json
+*.log

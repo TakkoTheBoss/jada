@@ -1,0 +1,11 @@
+Jada
+Copyright 2025-2026 Michael J. Curnow II
+
+Jada is named in memory of Jada, a resilient and unbreakable dog who
+survived cancer, multiple surgeries, and repeated recoveries with remarkable
+strength.
+
+This distribution includes nlohmann/json in the file json.hpp. That software
+retains its original copyright and license notices.
+
+Post-quantum support is experimental and depends on liboqs when enabled.

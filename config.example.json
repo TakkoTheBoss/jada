@@ -1,0 +1,17 @@
+{
+  "rpc_port": 5555,
+  "api_port": 8080,
+  "secret": "replace-with-a-long-random-shared-secret",
+  "K": 20,
+  "ALPHA": 3,
+  "request_timeout_ms": 3000,
+  "republish_period_sec": 3600,
+  "value_ttl_sec": 86400,
+  "snapshot_period_sec": 300,
+  "snapshot_path": "jada_snapshot.json",
+  "bootstrap": [],
+  "node_id": "0123456789abcdef0123456789abcdef01234567",
+  "id_bits": 160,
+  "pq_sign": false,
+  "pq_scheme": "DILITHIUM_2"
+}

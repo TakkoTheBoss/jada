@@ -1,0 +1,17 @@
+{
+  "rpc_port": 25555,
+  "api_port": 28080,
+  "secret": "jada-smoke-test",
+  "K": 20,
+  "ALPHA": 3,
+  "request_timeout_ms": 1000,
+  "republish_period_sec": 3600,
+  "value_ttl_sec": 60,
+  "snapshot_period_sec": 60,
+  "snapshot_path": "tests/smoke_snapshot.json",
+  "bootstrap": [],
+  "node_id": "0123456789abcdef0123456789abcdef01234567",
+  "id_bits": 160,
+  "pq_sign": false,
+  "pq_scheme": "DILITHIUM_2"
+}
