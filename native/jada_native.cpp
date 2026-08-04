@@ -1,10 +1,3 @@
-// Copyright 2025-2026 Michael J. Curnow II
-// SPDX-License-Identifier: Apache-2.0
-//
-// Jada native core.
-// This file contains the Kademlia engine, sockets, cryptography,
-// threading, storage, snapshots, managed node lifetime, and the narrow Hachi bridge API.
-
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -500,20 +493,50 @@ public:
         NodeID id; for(int i=0;i<g_id_bytes;i++) id.b[i]=md[i]; return id;
     }
 
-    // Interpret user-provided "key": if hex, use it; else hash text to NodeID
-    static NodeID parseUserKey(const std::string& keyStr){
-        auto is_hex = [](char c){ return (c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'); };
-        bool hexlike = !keyStr.empty();
-        for(char c : keyStr){ if (!is_hex(c)) { hexlike=false; break; } }
-        if (hexlike){
-            return NodeID::fromHex(keyStr);
-        } else {
-            unsigned char md[EVP_MAX_MD_SIZE]; unsigned int mdlen=0;
-            EVP_MD_CTX* ctx = EVP_MD_CTX_new(); EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
-            EVP_DigestUpdate(ctx, keyStr.data(), keyStr.size());
-            EVP_DigestFinal_ex(ctx, md, &mdlen); EVP_MD_CTX_free(ctx);
-            NodeID id; for(int i=0;i<g_id_bytes;i++) id.b[i]=md[i]; return id;
+    static bool isHexText(const std::string& text){
+        if (text.empty()) return false;
+        for (char c : text){
+            if (!((c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F'))) return false;
         }
+        return true;
+    }
+
+    static NodeID hashTextKey(const std::string& keyText){
+        unsigned char md[EVP_MAX_MD_SIZE]; unsigned int mdlen=0;
+        EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+        EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+        EVP_DigestUpdate(ctx, keyText.data(), keyText.size());
+        EVP_DigestFinal_ex(ctx, md, &mdlen);
+        EVP_MD_CTX_free(ctx);
+        NodeID id; for(int i=0;i<g_id_bytes;i++) id.b[i]=md[i]; return id;
+    }
+
+    // Normal keys are always treated as plaintext and hashed. Raw NodeIDs must
+    // be explicit: hex:<id> or 0x<id>. This prevents names such as "db",
+    // "face", or "deadbeef" from being silently interpreted as hexadecimal.
+    static std::optional<NodeID> parseUserKey(const std::string& keyText, std::string& error){
+        std::string rawHex;
+        if (keyText.rfind("hex:", 0)==0 || keyText.rfind("HEX:", 0)==0){
+            rawHex = keyText.substr(4);
+        } else if (keyText.rfind("0x", 0)==0 || keyText.rfind("0X", 0)==0){
+            rawHex = keyText.substr(2);
+        } else {
+            return hashTextKey(keyText);
+        }
+
+        if (rawHex.empty()){
+            error = "hex key is empty";
+            return std::nullopt;
+        }
+        if (!isHexText(rawHex)){
+            error = "hex key contains non-hexadecimal characters";
+            return std::nullopt;
+        }
+        if ((int)rawHex.size() > g_id_bytes*2){
+            error = "hex key exceeds configured NodeID width";
+            return std::nullopt;
+        }
+        return NodeID::fromHex(rawHex);
     }
 
     // Token = HMAC(secret, NodeID||rpc_port||timeslice)
@@ -563,7 +586,10 @@ public:
 
         if (op=="put"){
             if(!j.contains("key")||!j.contains("value")) return err("missing key or value");
-            NodeID key = parseUserKey(j["key"].get<std::string>());
+            const std::string inputKey = j["key"].get<std::string>();
+            std::string keyError; auto parsedKey = parseUserKey(inputKey, keyError);
+            if (!parsedKey) return err(keyError);
+            NodeID key = *parsedKey;
             std::string val = j["value"].get<std::string>();
             bool infinite=j.value("infinite",false); int ttl=j.value("ttl",  cfg.VALUE_TTL_SEC);
             if (val.size()>CFG_UDP_VALUE_MAX) return err("value too large (>1024B)");
@@ -571,10 +597,13 @@ public:
             auto nodes = iterativeFindNode(key);
             std::string tok = issueToken();
             for (auto& c: nodes) rpcStore(c, key, val, (uint32_t)ttl, infinite, tok);
-            return ok({{"msg","stored"},{"key",key.hex()},{"value",val},{"infinite",infinite}});
+            return ok({{"msg","stored"},{"key",inputKey},{"node_id",key.hex()},{"value",val},{"infinite",infinite}});
         } else if (op=="get"){
             if(!j.contains("key")) return err("missing key");
-            NodeID key = parseUserKey(j["key"].get<std::string>());
+            const std::string inputKey = j["key"].get<std::string>();
+            std::string keyError; auto parsedKey = parseUserKey(inputKey, keyError);
+            if (!parsedKey) return err(keyError);
+            NodeID key = *parsedKey;
             if (auto v=kv.getFresh(key)) return ok({{"value",*v}});
             if (auto r=iterativeFindValue(key)) return ok({{"value",*r}});
             return err("not_found");
@@ -583,35 +612,99 @@ public:
             std::string gname=j["group"].get<std::string>();
             auto items=j["items"].get<std::vector<json>>();
             bool infinite=j.value("infinite",false); int ttl=j.value("ttl",  cfg.VALUE_TTL_SEC);
-            std::vector<std::pair<NodeID,std::string>> kvs; kvs.reserve(items.size());
+
+            struct GroupItem {
+                std::string plaintextKey;
+                NodeID nodeId;
+                std::string value;
+            };
+            std::vector<GroupItem> kvs; kvs.reserve(items.size());
+
             for (auto& it : items){
-                NodeID k = parseUserKey(it["key"].get<std::string>());
-                std::string v=it["value"].get<std::string>();
-                if (v.size()>CFG_UDP_VALUE_MAX) return err("value too large (>1024B)");
-                kvs.push_back({k,v});
+                if (!it.contains("key") || !it.contains("value")) return err("group item missing key or value");
+                std::string plaintextKey = it["key"].get<std::string>();
+                std::string keyError; auto parsedKey = parseUserKey(plaintextKey, keyError);
+                if (!parsedKey) return err(keyError);
+                std::string value=it["value"].get<std::string>();
+                if (value.size()>CFG_UDP_VALUE_MAX) return err("value too large (>1024B)");
+                kvs.push_back({plaintextKey, *parsedKey, value});
             }
-            std::string tok = issueToken();
-            for (auto& pr: kvs){
-                kv.put(pr.first, pr.second, std::chrono::seconds(ttl), infinite, true);
-                auto nodes = iterativeFindNode(pr.first);
-                for (auto& c: nodes) rpcStore(c, pr.first, pr.second, (uint32_t)ttl, infinite, tok);
+
+            NodeID gkey = groupIndexKey(gname);
+            json idx; idx["group"]=gname; idx["version"]=2; idx["items"]=json::array();
+            for (auto& item: kvs){
+                idx["items"].push_back({{"key",item.plaintextKey},{"node_id",item.nodeId.hex()}});
             }
-            NodeID gkey = groupIndexKey(gname); json idx; idx["group"]=gname; idx["items"]=json::array();
-            for (auto& pr: kvs) idx["items"].push_back(pr.first.hex());
             std::string idxs=idx.dump();
+            if (idxs.size()>CFG_UDP_VALUE_MAX) return err("group index too large (>1024B)");
+
+            std::string tok = issueToken();
+            for (auto& item: kvs){
+                kv.put(item.nodeId, item.value, std::chrono::seconds(ttl), infinite, true);
+                auto nodes = iterativeFindNode(item.nodeId);
+                for (auto& c: nodes) rpcStore(c, item.nodeId, item.value, (uint32_t)ttl, infinite, tok);
+            }
+
             kv.put(gkey, idxs, std::chrono::seconds(ttl), infinite, true);
-            auto gnodes=iterativeFindNode(gkey); for (auto& c: gnodes) rpcStore(c, gkey, idxs, (uint32_t)ttl, infinite, tok);
-            return ok({{"stored_group",gname}});
+            auto gnodes=iterativeFindNode(gkey);
+            for (auto& c: gnodes) rpcStore(c, gkey, idxs, (uint32_t)ttl, infinite, tok);
+            return ok({{"stored_group",gname},{"items",kvs.size()}});
         } else if (op=="group.get"){
             if(!j.contains("group")) return err("missing group");
             std::string gname=j["group"].get<std::string>(); NodeID gkey=groupIndexKey(gname);
-            std::optional<std::string> idx = kv.getFresh(gkey); if(!idx) if (auto r=iterativeFindValue(gkey)) idx=r; if (!idx) return err("not_found");
+            std::optional<std::string> idx = kv.getFresh(gkey);
+            if(!idx) if (auto r=iterativeFindValue(gkey)) idx=r;
+            if (!idx) return err("not_found");
+
             json ij; try{ ij=json::parse(*idx);}catch(...){ return err("index_parse_error"); }
-            std::vector<std::string> keys; if (ij.contains("items")) keys = ij["items"].get<std::vector<std::string>>();
+            if (!ij.contains("items") || !ij["items"].is_array()) return err("index_parse_error");
+
             json out; out["ok"]=true; out["group"]=gname; out["items"]=json::array();
-            for (auto& kh: keys){
-                NodeID k=parseUserKey(kh); auto v=kv.getFresh(k); if (!v){ if (auto r=iterativeFindValue(k)) v=r; } if (!v) continue;
-                out["items"].push_back({{"key",kh},{"value",*v}});
+            bool containsLegacyItems=false;
+
+            for (const auto& stored : ij["items"]){
+                std::string plaintextKey;
+                std::string nodeIdHex;
+                bool legacy=false;
+
+                if (stored.is_string()){
+                    // Version 1 indexes stored only the NodeID. The original
+                    // plaintext key cannot be reconstructed from that hash.
+                    nodeIdHex = stored.get<std::string>();
+                    plaintextKey = nodeIdHex;
+                    legacy=true;
+                } else if (stored.is_object()){
+                    if (stored.contains("node_id")){
+                        nodeIdHex = stored["node_id"].get<std::string>();
+                        plaintextKey = stored.value("key", nodeIdHex);
+                    } else if (stored.contains("name") && stored.contains("key")){
+                        // Transitional object format: {"name": plaintext,
+                        // "key": node_id}.
+                        plaintextKey = stored["name"].get<std::string>();
+                        nodeIdHex = stored["key"].get<std::string>();
+                    } else {
+                        return err("index_parse_error");
+                    }
+                } else {
+                    return err("index_parse_error");
+                }
+
+                if (!isHexText(nodeIdHex) || (int)nodeIdHex.size()>g_id_bytes*2) return err("index_parse_error");
+                NodeID keyNode = NodeID::fromHex(nodeIdHex);
+                auto value=kv.getFresh(keyNode);
+                if (!value){ if (auto r=iterativeFindValue(keyNode)) value=r; }
+                if (!value) continue;
+
+                json result={{"key",plaintextKey},{"node_id",keyNode.hex()},{"value",*value}};
+                if (legacy){
+                    result["legacy_index"]=true;
+                    containsLegacyItems=true;
+                }
+                out["items"].push_back(result);
+            }
+            if (containsLegacyItems){
+                out["legacy_index"]=true;
+                out["warning"]="Plaintext keys are unavailable for legacy hash-only group indexes. Rewrite the group to upgrade it.";
             }
             return out.dump();
         } else if (op=="nearest"){
@@ -1118,3 +1211,4 @@ int run_node(const std::string& config_path){
 }
 
 } // namespace jada_native
+
